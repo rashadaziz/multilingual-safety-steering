@@ -3,19 +3,17 @@ from transformers import pipeline
 import json
 
 # %%
-pipe = pipeline("translation", model="facebook/nllb-200-distilled-600M")
+# pipe = pipeline("translation", model="facebook/nllb-200-distilled-600M")
 
 # %%
-with open('output/cast/korean.json', 'r') as f:
+with open('output/cast/korean_linguistic_subspace.json', 'r') as f:
     eval_data = json.load(f)
 # %%
-translations = pipe([data['response'] for data in eval_data], src_lang='kor_Hang', tgt_lang='eng_Latn')
-# %%
-for i, translation in enumerate(translations):
-    eval_data[i]['response_translated'] = translation['translation_text']
-# %%
-with open('output/cast/korean.json', 'w') as f:
-    json.dump(eval_data, f, indent=4)
+# translations = pipe([data['response'] for data in eval_data], src_lang='kor_Hang', tgt_lang='eng_Latn')
+# # %%
+# for i, translation in enumerate(translations):
+#     eval_data[i]['response_translated'] = translation['translation_text']
+
 # %%
 import fasttext
 from huggingface_hub import hf_hub_download
@@ -31,15 +29,23 @@ target = '__label__kor_Hang'
 for data in eval_data:
     pred, _ = model.predict(data['response'].replace("\n", " "))
     data['code_switched'] = pred[0] != target
+    data['response_lang'] = pred[0]
 # %%
+from collections import Counter
 unswitched = 0
+switches = Counter()
 
 for data in eval_data:
     if data['code_switched']:
+        switches[data['response_lang']] += 1
         continue
     unswitched += 1
 # %%
 print(f'Lang Fidelity: {unswitched / len(eval_data)}')
+
+# %%
+with open('output/cast/korean_linguistic_subspace.json', 'w') as f:
+    json.dump(eval_data, f, indent=4)
 # %%
 from transformers import (
     AutoTokenizer,
@@ -126,7 +132,6 @@ compliance = 0
 for i, eval in enumerate(eval_safety):
     if eval[2] == 'Yes':
         continue
-    print(f"Compliance Response: {eval_data[i]['response_translated']}")
     compliance += 1
 
 # %%

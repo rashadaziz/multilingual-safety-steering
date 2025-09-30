@@ -6,9 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "activation-steering",
+    "datasets>=4.1.1",
     "einops>=0.8.1",
     "fasttext>=0.9.3",
     "polars>=1.33.1",
+    "scikit-learn>=1.7.2",
     "torch>=2.8.0",
     "tqdm>=4.67.1",
     "transformers>=4.56.2",
