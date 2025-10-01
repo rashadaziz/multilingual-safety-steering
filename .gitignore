@@ -10,4 +10,4 @@ wheels/
 .venv
 
 # Misc
-output/**/pca
+output
