@@ -1,0 +1,2 @@
+# WARNING
+The code in this directory may or may not work. The files were part of a pilot study and a lot has changed since then e.g some directory paths referenced in some files are not there anymore. These were kept as reference-only.
