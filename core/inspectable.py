@@ -12,6 +12,10 @@ class InspectableModel(HookableModel):
     @property
     def activation_cache(self):
         return torch.stack([acts for _, acts in self._activation_cache.items()])
+    
+    @property
+    def intervention_cache(self):
+        return torch.stack([acts for _, acts in self._intervention_cache.items()])
 
     def cache_activations(
         self,
@@ -32,6 +36,8 @@ class InspectableModel(HookableModel):
         finally:
             for handle in handles:
                 handle.remove()
+
+        return self.activation_cache
 
     def cache_interventions(
         self,
@@ -64,6 +70,7 @@ class InspectableModel(HookableModel):
             for i, original_hook in self._hook_wrappers.items():
                 self._hooks[i] = self.layers[i].register_forward_hook(original_hook)
         
+        return self.intervention_cache
     
     def forward_without_interventions(
         self,
