@@ -16,6 +16,10 @@ class InspectableModel(HookableModel):
     @property
     def intervention_cache(self):
         return torch.stack([acts for _, acts in self._intervention_cache.items()])
+    
+    def clear_cache(self):
+        self._activation_cache.clear()
+        self._intervention_cache.clear()
 
     def cache_activations(
         self,

@@ -1,4 +1,60 @@
 import torch as t
+from tqdm.auto import tqdm
+from core.inspectable import InspectableModel
+from data import load_flores_plus, FLORES_LANGUAGE_CODES
+
+def compute_language_means(model: InspectableModel, batch_size: int = 32):
+    if model.tokenizer is None:
+        raise ValueError("Model tokenizer must be provided to compute language means.")
+
+    prompts = {
+        lang: load_flores_plus(lang) for lang in FLORES_LANGUAGE_CODES
+    }
+
+    language_means: list[t.Tensor] = []
+    languages = list(prompts.keys())
+
+    for lang in tqdm(languages, desc="Languages"):
+        dataset = prompts[lang]
+
+        sum_hidden: t.Tensor | None = None
+        running_count = 0
+
+        batch_iterator = range(0, len(dataset), batch_size)
+        for i in tqdm(
+            batch_iterator,
+            desc=f"{lang.value} batches",
+            leave=False,
+        ):
+            batch = dataset[i : i + batch_size]
+            conversations = [
+                [{"role": "user", "content": example.prompt}] for example in batch
+            ]
+
+            activations = model.cache_activations(conversations)  # (num_layers, batch, seq_len, hidden_size)
+
+            if sum_hidden is None:
+                num_layers, _, _, hidden_size = activations.shape
+                sum_hidden = t.zeros(
+                    (num_layers, hidden_size),
+                    dtype=t.float64,
+                )
+
+            for layer_idx in range(activations.shape[0]):
+                layer_hidden = activations[layer_idx]  # (batch, seq_len, hidden_size)
+                final_tokens = layer_hidden[:, -1, :]  # left padding keeps final token at -1
+                sum_hidden[layer_idx] += final_tokens.to(t.float64).sum(dim=0)
+
+            running_count += len(batch)
+
+        if sum_hidden is None or running_count == 0:
+            raise ValueError(f"Unable to compute language means for language '{lang.value}'.")
+
+        mean_hidden = (sum_hidden / running_count).to(dtype=t.float32).contiguous()
+        language_means.append(mean_hidden)
+
+    # (num_langs, num_layers, hidden_size) => (num_layers, hidden_size, num_langs)
+    return t.stack(language_means, dim=0).permute(1, 2, 0).contiguous()
 
 def compute_language_subspace(language_means: t.Tensor, rank: int) -> tuple[t.Tensor, t.Tensor]:
     """

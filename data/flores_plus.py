@@ -1,31 +1,29 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Mapping, MutableMapping
+from typing import Dict, Iterable, List, Mapping, MutableMapping
 
-from datasets import Dataset, load_dataset
+from datasets import Dataset, load_dataset, logging
 
 from ._utils import sample_examples
 from .types import FLORES_LANGUAGE_CODES, Language, PromptExample
 
+dataset = load_dataset("openlanguagedata/flores_plus")
+CODE_TO_LANGUAGE: Dict[str, Language] = {code: lang for lang, code in FLORES_LANGUAGE_CODES.items()}
+DEFAULT_SPLITS = ("dev",)
+_LANGUAGE_PROMPT_CACHE: Dict[str, List[PromptExample]] | None = None
 
-def load_flores_plus(
-    language: Language,
-    num_samples: int | None = None,
-    seed: int | None = None,
-) -> List[PromptExample]:
-    """Load FLORES++ prompts for a given language across default splits."""
 
-    code = FLORES_LANGUAGE_CODES.get(language)
-    if code is None:
-        raise ValueError(f"No FLORES++ code registered for language '{language.value}'")
+def _ensure_language_cache() -> Dict[str, List[PromptExample]]:
+    global _LANGUAGE_PROMPT_CACHE
+    if _LANGUAGE_PROMPT_CACHE is not None:
+        return _LANGUAGE_PROMPT_CACHE
 
-    dataset = load_dataset("openlanguagedata/flores_plus")
     if not isinstance(dataset, MutableMapping):
         raise TypeError("Expected FLORES++ load_dataset call to return a DatasetDict-like object")
 
-    examples: List[PromptExample] = []
-    default_splits = ("dev",)
-    for split in default_splits:
+    cache: Dict[str, List[PromptExample]] = {code: [] for code in FLORES_LANGUAGE_CODES.values()}
+
+    for split in DEFAULT_SPLITS:
         if split not in dataset:
             continue
         split_dataset = dataset[split]
@@ -46,14 +44,15 @@ def load_flores_plus(
                 continue
 
             record_code = f"{iso_639_3.strip()}_{iso_15924.strip()}"
-            if record_code != code:
+            language = CODE_TO_LANGUAGE.get(record_code)
+            if language is None:
                 continue
 
             metadata = {"split": split, "flores_code": record_code}
             if isinstance(record.get("id"), str):
                 metadata["id"] = record["id"]  # type: ignore[index]
 
-            examples.append(
+            cache[record_code].append(
                 PromptExample(
                     prompt=text.strip(),
                     source="flores_plus",
@@ -61,4 +60,21 @@ def load_flores_plus(
                     metadata=metadata,
                 )
             )
-    return sample_examples(examples, num_samples, seed)
+
+    _LANGUAGE_PROMPT_CACHE = cache
+    return cache
+
+def load_flores_plus(
+    language: Language,
+    num_samples: int | None = None,
+    seed: int | None = None,
+) -> List[PromptExample]:
+    """Load FLORES++ prompts for a given language across default splits."""
+
+    code = FLORES_LANGUAGE_CODES.get(language)
+    if code is None:
+        raise ValueError(f"No FLORES++ code registered for language '{language.value}'")
+
+    cache = _ensure_language_cache()
+    examples = cache.get(code, [])
+    return sample_examples(examples, num_samples, seed if seed is not None else 42)
