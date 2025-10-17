@@ -1,25 +1,100 @@
-from __future__ import annotations
-
 from typing import Any, Dict, Mapping, Sequence
 
 import torch
 from transformers import PreTrainedTokenizerBase
 from .hookable import HookableModel
+from hooks.caching import build_caching_hook, build_intervention_caching_hook
 
 class InspectableModel(HookableModel):
-    def forward(
+    _activation_cache: Dict[int, torch.Tensor] = {}
+    _intervention_cache: Dict[int, torch.Tensor] = {}
+
+    @property
+    def activation_cache(self):
+        return torch.stack([acts for _, acts in self._activation_cache.items()])
+
+    def cache_activations(
         self,
         messages: Sequence[Mapping[str, Any]] | Sequence[Sequence[Mapping[str, Any]]] | None = None,
         *,
         prompts: str | Sequence[str] | None = None,
         tokenizer: PreTrainedTokenizerBase | None = None,
-        use_cache: bool = False,
-        inputs: Mapping[str, Any] | None = None,
-        **model_inputs: Any,
+        **kwargs: Any,
+    ):  
+        self._activation_cache.clear()
+
+        handles = []
+        for i, layer in enumerate(self.layers):
+            handles.append(layer.register_forward_hook(build_caching_hook(self._activation_cache, i)))
+        
+        try:
+            self.forward_without_interventions(messages, prompts=prompts, tokenizer=tokenizer, **kwargs)
+        finally:
+            for handle in handles:
+                handle.remove()
+
+    def cache_interventions(
+        self,
+        messages: Sequence[Mapping[str, Any]] | Sequence[Sequence[Mapping[str, Any]]] | None = None,
+        *,
+        independent: bool = False,
+        prompts: str | Sequence[str] | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        **kwargs: Any,
+    ):
+        self._intervention_cache.clear()
+
+        # temporarily remove original hooks
+        for _, handle in self._hooks.items():
+            handle.remove()
+
+        # rewrap them
+        handles = []
+        for i, original_hook in self._hook_wrappers.items():
+            handles.append(self.layers[i].register_forward_hook(build_intervention_caching_hook(original_hook, self._intervention_cache, i, independent)))
+        
+        try:
+            self.forward_with_interventions(messages, prompts=prompts, tokenizer=tokenizer, **kwargs)
+        finally:
+            # remove the re-wrapped versions
+            for handle in handles:
+                handle.remove()
+
+            # restore the original ones
+            for i, original_hook in self._hook_wrappers.items():
+                self._hooks[i] = self.layers[i].register_forward_hook(original_hook)
+        
+    
+    def forward_without_interventions(
+        self,
+        messages: Sequence[Mapping[str, Any]] | Sequence[Sequence[Mapping[str, Any]]] | None = None,
+        *,
+        prompts: str | Sequence[str] | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        **kwargs: Any,
+    ):
+        with self.hooks_disabled():
+            self._forward(messages, prompts=prompts, tokenizer=tokenizer, **kwargs)
+
+    def forward_with_interventions(
+        self,
+        messages: Sequence[Mapping[str, Any]] | Sequence[Sequence[Mapping[str, Any]]] | None = None,
+        *,
+        prompts: str | Sequence[str] | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        **kwargs: Any,
+    ):
+        self._forward(messages, prompts=prompts, tokenizer=tokenizer, **kwargs)
+
+    def _forward(
+        self,
+        messages: Sequence[Mapping[str, Any]] | Sequence[Sequence[Mapping[str, Any]]] | None = None,
+        *,
+        prompts: str | Sequence[str] | None = None,
+        tokenizer: PreTrainedTokenizerBase | None = None,
+        **kwargs: Any,
     ):
         payload: Dict[str, Any] = {}
-        if inputs is not None:
-            payload.update(dict(inputs))
 
         active_tokenizer = tokenizer or self.tokenizer
         if prompts is not None and messages is not None:
@@ -55,10 +130,9 @@ class InspectableModel(HookableModel):
             )
             payload.update({k: v.to(self.device) for k, v in encoded.items()})
 
-        payload.update(model_inputs)
         if not payload:
             raise ValueError("No inputs were provided to forward.")
 
         self.model.eval()
-        with torch.no_grad():
-            self.model(**payload, use_cache=use_cache)
+        with torch.inference_mode():
+            self.model(**payload, use_cache=False, **kwargs)
