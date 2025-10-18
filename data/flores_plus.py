@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, Iterable, List, Mapping, MutableMapping
 
-from datasets import Dataset, load_dataset, logging
+from datasets import Dataset, load_dataset
 
 from ._utils import sample_examples
 from .types import FLORES_LANGUAGE_CODES, Language, PromptExample
@@ -77,4 +77,4 @@ def load_flores_plus(
 
     cache = _ensure_language_cache()
     examples = cache.get(code, [])
-    return sample_examples(examples, num_samples, seed if seed is not None else 42)
+    return sample_examples(examples, num_samples)

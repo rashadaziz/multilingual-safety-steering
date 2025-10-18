@@ -83,7 +83,7 @@ def compute_language_subspace(language_means: t.Tensor, rank: int) -> tuple[t.Te
     # Approximate M in low rank
     U, S, Vh = t.linalg.svd(centered, full_matrices=False)
     M_specific: t.Tensor = U[:, :rank] # (d, r)  (candidate M_specific)
-    Gamma: t.Tensor = Vh.T[:rank, :] @ t.diag(S[:rank]) # (L, r)  (candidate Gamma)
+    Gamma: t.Tensor = Vh[:rank, :].T @ t.diag(S[:rank]) # (L, r)  (candidate Gamma)
 
     ones = t.ones(L, 1, dtype=M.dtype, device=M.device)
     M_reconstructed = mean + M_specific @ Gamma.T # (d, L)
