@@ -46,11 +46,21 @@ class SteerableModel(HookableModel):
         )
         encoded = {k: v.to(self.device) for k, v in encoded.items()}
         input_ids = encoded["input_ids"]
-        if "attention_mask" in encoded:
-            prompt_lengths = encoded["attention_mask"].sum(dim=1).to(torch.long)
+        attention_mask = encoded.get("attention_mask")
+        sequence_length = input_ids.shape[1]
+
+        if getattr(active_tokenizer, "padding_side", None) == "left":
+            start_positions = torch.full(
+                (input_ids.shape[0],),
+                sequence_length,
+                dtype=torch.long,
+                device=input_ids.device,
+            )
+        elif attention_mask is not None:
+            start_positions = attention_mask.sum(dim=1).to(torch.long)
         else:
-            prompt_lengths = torch.tensor(
-                [input_ids.shape[1]] * input_ids.shape[0],
+            start_positions = torch.tensor(
+                [sequence_length] * input_ids.shape[0],
                 device=input_ids.device,
                 dtype=torch.long,
             )
@@ -60,12 +70,24 @@ class SteerableModel(HookableModel):
             outputs = self.model.generate(**encoded, **generate_kwargs)
 
         continuations: list[str] = []
+        removable_tokens = {
+            token_id for token_id in (
+                getattr(active_tokenizer, "eos_token_id", None),
+                getattr(active_tokenizer, "pad_token_id", None),
+            )
+            if token_id is not None
+        }
+
         for i in range(outputs.shape[0]):
-            start = int(prompt_lengths[i].item())
+            start = int(start_positions[i].item())
             continuation_tokens = outputs[i, start:]
             if continuation_tokens.numel() == 0:
                 continuations.append("")
                 continue
             token_ids = continuation_tokens.detach().cpu().tolist()
-            continuations.append(active_tokenizer.decode(token_ids, skip_special_tokens=True))
+            while token_ids and removable_tokens and token_ids[-1] in removable_tokens:
+                token_ids.pop()
+            continuations.append(
+                active_tokenizer.decode(token_ids, skip_special_tokens=True).strip()
+            )
         return continuations

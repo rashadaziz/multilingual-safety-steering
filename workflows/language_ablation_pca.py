@@ -29,11 +29,23 @@ def main():
     ]
 
     harmless_prompts = {
-        lang: load_polyrefuse(lang, kind='harmless', num_samples=samples_per_lang) for lang in languages
+        lang: load_polyrefuse(
+            lang,
+            kind='harmless',
+            use_translated_text=lang != Language.ENGLISH,
+            num_samples=samples_per_lang,
+        )
+        for lang in languages
     }
 
     harmful_prompts = {
-        lang: load_polyrefuse(lang, kind='harmful', num_samples=samples_per_lang) for lang in languages
+        lang: load_polyrefuse(
+            lang,
+            kind='harmful',
+            use_translated_text=lang != Language.ENGLISH,
+            num_samples=samples_per_lang,
+        )
+        for lang in languages
     }
 
     original_activations = {}

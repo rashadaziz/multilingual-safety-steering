@@ -37,6 +37,8 @@ def available_polyrefuse_languages() -> List[Language]:
 def load_polyrefuse(
     language: Language,
     kind: Literal['harmful', 'harmless'] = 'harmful',
+    *,
+    use_translated_text: bool = False,
     num_samples: int | None = None,
     seed: int | None = None,
 ) -> List[PromptExample]:
@@ -57,7 +59,10 @@ def load_polyrefuse(
 
     examples: List[PromptExample] = []
     for record in read_json_records(dataset_path):
-        instruction = record.get("instruction")
+        text_key = "instruction_translated" if use_translated_text else "instruction"
+        instruction = record.get(text_key)
+        if use_translated_text and not isinstance(instruction, str):
+            instruction = record.get("instruction")
         if not isinstance(instruction, str):
             continue
         category = record.get("category")

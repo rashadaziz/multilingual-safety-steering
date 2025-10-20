@@ -11,3 +11,6 @@ wheels/
 
 # Misc
 output
+
+# env
+.env
