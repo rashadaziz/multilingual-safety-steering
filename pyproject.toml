@@ -11,6 +11,7 @@ dependencies = [
     "fasttext>=0.9.3",
     "openai>=2.5.0",
     "polars>=1.33.1",
+    "python-dotenv>=1.1.1",
     "pyyaml>=6.0.2",
     "scikit-learn>=1.7.2",
     "tenacity>=9.1.2",

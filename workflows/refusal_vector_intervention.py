@@ -117,6 +117,69 @@ def _prompt_to_messages(examples: Sequence[PromptExample]) -> List[List[dict]]:
     return conversations
 
 
+def _generate_split(
+    *,
+    split: str,
+    output_path: Path,
+    language: Language,
+    use_translated_text: bool,
+    num_prompts: int,
+    seed: int,
+    batch_size: int,
+    steerable: SteerableModel,
+    generation_kwargs: dict,
+    steering_label: str,
+) -> int:
+    try:
+        prompts = load_polyrefuse(
+            language,
+            kind=split,
+            use_translated_text=use_translated_text,
+            num_samples=num_prompts,
+            seed=seed,
+        )
+    except ValueError as exc:
+        print(f"Skipping {split} split: {exc}")
+        return 0
+
+    if not prompts:
+        print(f"No prompts available for the {split} split.")
+        return 0
+
+    results: List[dict] = []
+
+    num_batches = ceil(len(prompts) / batch_size) if prompts else 0
+
+    for batch in tqdm(
+        _chunked(prompts, batch_size),
+        total=num_batches,
+        desc=f"Generating responses ({split})",
+    ):
+        messages = _prompt_to_messages(batch)
+        continuations = steerable.generate(
+            messages=messages,
+            **generation_kwargs,
+        )
+        for example, response in zip(batch, continuations):
+            record = {
+                "prompt": example.prompt,
+                "response": response.strip(),
+                "language": example.language.value if example.language is not None else None,
+                "source": example.source,
+                "metadata": dict(example.metadata) if example.metadata is not None else None,
+                "steering": steering_label,
+                "split": split,
+            }
+            results.append(record)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as fout:
+        json.dump(results, fout, ensure_ascii=False, indent=2)
+
+    print(f"Wrote {len(results)} prompt-response pairs to {output_path}")
+    return len(results)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate responses with a refusal steering vector.")
     parser.add_argument("--model-name", default="Qwen/Qwen2.5-1.5B-Instruct")
@@ -126,7 +189,23 @@ def main() -> None:
     parser.add_argument("--num-prompts", type=int, default=64)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--output-path", type=Path, default=Path("output/language-refusal/prompt_responses.json"))
+    parser.add_argument(
+        "--output-path",
+        type=Path,
+        default=None,
+        help="Path for the primary split output JSON. Defaults depend on the chosen split.",
+    )
+    parser.add_argument(
+        "--harmless-output-path",
+        type=Path,
+        default=None,
+        help="Where to write responses for the harmless PolyRefuse split when generated.",
+    )
+    parser.add_argument(
+        "--skip-harmless",
+        action="store_true",
+        help="Skip generating responses for the harmless PolyRefuse split.",
+    )
     parser.add_argument("--refusal-strength", type=float, default=2.0)
     parser.add_argument("--max-new-tokens", type=int, default=128)
     parser.add_argument("--do-sample", action="store_true")
@@ -169,15 +248,13 @@ def main() -> None:
         layers=_parse_layers(args.layers) if args.layers is not None else None,
     )
 
-    prompts = load_polyrefuse(
-        args.language,
-        kind=args.split,
-        use_translated_text=args.language != Language.ENGLISH,
-        num_samples=args.num_prompts,
-        seed=args.seed,
-    )
+    if args.output_path is None:
+        default_name = "prompt_responses_harmless.json" if args.split == "harmless" else "prompt_responses.json"
+        args.output_path = Path("output/language-refusal") / default_name
 
-    results: List[dict] = []
+    if args.harmless_output_path is None:
+        args.harmless_output_path = Path("output/language-refusal/prompt_responses_harmless.json")
+
     generation_kwargs = {
         "max_new_tokens": args.max_new_tokens,
         "do_sample": args.do_sample,
@@ -185,34 +262,35 @@ def main() -> None:
     if args.do_sample:
         generation_kwargs.update({"temperature": args.temperature, "top_p": args.top_p})
 
-    num_batches = ceil(len(prompts) / args.batch_size) if prompts else 0
+    steering_label = "refusal_language_ablated" if projection else "refusal_only"
+    use_translated_text = args.language != Language.ENGLISH
 
-    for batch in tqdm(
-        _chunked(prompts, args.batch_size),
-        total=num_batches,
-        desc="Generating responses",
-    ):
-        messages = _prompt_to_messages(batch)
-        continuations = steerable.generate(
-            messages=messages,
-            **generation_kwargs,
+    _generate_split(
+        split=args.split,
+        output_path=args.output_path,
+        language=args.language,
+        use_translated_text=use_translated_text,
+        num_prompts=args.num_prompts,
+        seed=args.seed,
+        batch_size=args.batch_size,
+        steerable=steerable,
+        generation_kwargs=generation_kwargs,
+        steering_label=steering_label,
+    )
+
+    if not args.skip_harmless and args.split != "harmless":
+        _generate_split(
+            split="harmless",
+            output_path=args.harmless_output_path,
+            language=args.language,
+            use_translated_text=use_translated_text,
+            num_prompts=args.num_prompts,
+            seed=args.seed,
+            batch_size=args.batch_size,
+            steerable=steerable,
+            generation_kwargs=generation_kwargs,
+            steering_label=steering_label,
         )
-        for example, response in zip(batch, continuations):
-            record = {
-                "prompt": example.prompt,
-                "response": response.strip(),
-                "language": example.language.value if example.language is not None else None,
-                "source": example.source,
-                "metadata": dict(example.metadata) if example.metadata is not None else None,
-                "steering": "refusal_language_ablated" if projection else "refusal_only",
-            }
-            results.append(record)
-
-    args.output_path.parent.mkdir(parents=True, exist_ok=True)
-    with args.output_path.open("w", encoding="utf-8") as fout:
-        json.dump(results, fout, ensure_ascii=False, indent=2)
-
-    print(f"Wrote {len(results)} prompt-response pairs to {args.output_path}")
 
 if __name__ == '__main__':
     main()
