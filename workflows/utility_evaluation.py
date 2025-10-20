@@ -111,7 +111,7 @@ def main() -> None:
         help="Where to write aggregate utility results.",
     )
     parser.add_argument(
-        "--refusal-model",
+        "--model",
         default="gpt-5",
         help="External judge model identifier.",
     )
@@ -129,12 +129,12 @@ def main() -> None:
         print(f"No records found in {args.input_path}.")
         return
 
-    client = ExternalLLMClient(model=args.refusal_model)
+    client = ExternalLLMClient(model=args.model)
     judgements, refusal_count = asyncio.run(
         _evaluate_refusals_async(
             records,
             client=client,
-            model_name=args.refusal_model,
+            model_name=args.model,
             max_concurrency=args.max_concurrency,
         )
     )

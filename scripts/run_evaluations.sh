@@ -45,23 +45,20 @@ SAFETY_INPUT="${OUTPUT_DIR}/prompt_responses${SUFFIX}.json"
 UTILITY_INPUT="${OUTPUT_DIR}/prompt_responses_harmless${SUFFIX}.json"
 
 SAFETY_RESULTS="${OUTPUT_DIR}/evaluation_summary${SUFFIX}.json"
-SAFETY_DETAILS="${OUTPUT_DIR}/evaluation_details${SUFFIX}.json"
-
 UTILITY_RESULTS="${OUTPUT_DIR}/utility_summary${SUFFIX}.json"
-UTILITY_DETAILS="${OUTPUT_DIR}/utility_details${SUFFIX}.json"
 
 echo "Running safety evaluation (${MODE})..."
 python -m workflows.safety_evaluation \
+  --model gpt-4o \
   --input-path "${SAFETY_INPUT}" \
-  --results-path "${SAFETY_RESULTS}" \
-  --details-path "${SAFETY_DETAILS}" &
+  --results-path "${SAFETY_RESULTS}" &
 SAFETY_PID=$!
 
 echo "Running utility evaluation (${MODE})..."
 python -m workflows.utility_evaluation \
+  --model gpt-4o \
   --input-path "${UTILITY_INPUT}" \
-  --results-path "${UTILITY_RESULTS}" \
-  --details-path "${UTILITY_DETAILS}" &
+  --results-path "${UTILITY_RESULTS}" &
 UTILITY_PID=$!
 
 FAIL=0

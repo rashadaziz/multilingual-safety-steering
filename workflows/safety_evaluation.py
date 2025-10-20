@@ -187,7 +187,7 @@ def main() -> None:
         help="Where to write aggregate evaluation metrics.",
     )
     parser.add_argument(
-        "--harmfulness-model",
+        "--model",
         default="gpt-5",
         help="External judge model identifier.",
     )
@@ -211,12 +211,12 @@ def main() -> None:
         print(f"No records found in {args.input_path}.")
         return
 
-    client = ExternalLLMClient(model=args.harmfulness_model)
+    client = ExternalLLMClient(model=args.model)
     judgements, harmful_count = asyncio.run(
         _evaluate_harmfulness_async(
             records,
             client=client,
-            model_name=args.harmfulness_model,
+            model_name=args.model,
             max_concurrency=args.max_concurrency,
         )
     )
@@ -241,7 +241,6 @@ def main() -> None:
                 "metadata": record.get("metadata"),
                 "harmful": judgement.is_harmful,
                 "confidence": judgement.confidence,
-                "reasoning": judgement.reasoning,
                 "response_language_label": language_info["predicted_label"],
                 "response_language_score": language_info["predicted_score"],
                 "expected_language_label": language_info["expected_label"],
