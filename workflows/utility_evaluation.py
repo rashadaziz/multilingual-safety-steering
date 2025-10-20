@@ -111,6 +111,12 @@ def main() -> None:
         help="Where to write aggregate utility results.",
     )
     parser.add_argument(
+        "--details-path",
+        type=Path,
+        default=None,
+        help="Optional path for writing per-example refusal judgements.",
+    )
+    parser.add_argument(
         "--refusal-model",
         default="gpt-5",
         help="External judge model identifier.",
@@ -171,6 +177,11 @@ def main() -> None:
     args.results_path.parent.mkdir(parents=True, exist_ok=True)
     with args.results_path.open("w", encoding="utf-8") as fout:
         json.dump(aggregate_results, fout, ensure_ascii=False, indent=2)
+
+    if args.details_path is not None:
+        args.details_path.parent.mkdir(parents=True, exist_ok=True)
+        with args.details_path.open("w", encoding="utf-8") as fout:
+            json.dump(per_example_results, fout, ensure_ascii=False, indent=2)
 
     print(f"Evaluated {total_examples} examples.")
     print(f"Over-refusal rate: {over_refusal_rate:.3%} ({refusal_count}/{total_examples})")
