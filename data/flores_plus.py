@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Dict, Iterable, List, Mapping, MutableMapping
 
 from datasets import Dataset, load_dataset

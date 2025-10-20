@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import List
 
 from ._utils import DATA_DIR, read_json_records, sample_examples
