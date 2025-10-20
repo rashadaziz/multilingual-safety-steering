@@ -1,5 +1,6 @@
 import argparse
 import json
+import sys
 from math import ceil
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
@@ -120,7 +121,6 @@ def _prompt_to_messages(examples: Sequence[PromptExample]) -> List[List[dict]]:
 def _generate_split(
     *,
     split: str,
-    output_path: Path,
     language: Language,
     use_translated_text: bool,
     num_prompts: int,
@@ -129,7 +129,7 @@ def _generate_split(
     steerable: SteerableModel,
     generation_kwargs: dict,
     steering_label: str,
-) -> int:
+) -> List[dict]:
     try:
         prompts = load_polyrefuse(
             language,
@@ -139,12 +139,12 @@ def _generate_split(
             seed=seed,
         )
     except ValueError as exc:
-        print(f"Skipping {split} split: {exc}")
-        return 0
+        print(f"Skipping {split} split for {language.value}: {exc}")
+        return []
 
     if not prompts:
-        print(f"No prompts available for the {split} split.")
-        return 0
+        print(f"No prompts available for the {language.value} {split} split.")
+        return []
 
     results: List[dict] = []
 
@@ -153,7 +153,7 @@ def _generate_split(
     for batch in tqdm(
         _chunked(prompts, batch_size),
         total=num_batches,
-        desc=f"Generating responses ({split})",
+        desc=f"Generating responses ({language.value} / {split})",
     ):
         messages = _prompt_to_messages(batch)
         continuations = steerable.generate(
@@ -172,19 +172,27 @@ def _generate_split(
             }
             results.append(record)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as fout:
-        json.dump(results, fout, ensure_ascii=False, indent=2)
-
-    print(f"Wrote {len(results)} prompt-response pairs to {output_path}")
-    return len(results)
+    print(f"Collected {len(results)} prompt-response pairs for {language.value} ({split}).")
+    return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate responses with a refusal steering vector.")
     parser.add_argument("--model-name", default="Qwen/Qwen2.5-1.5B-Instruct")
     parser.add_argument("--refusal-vector", type=Path, default=Path("output/cast/refusal_vector.svec"))
-    parser.add_argument("--language", type=_parse_language, default=Language.ENGLISH)
+    parser.add_argument(
+        "--language",
+        type=_parse_language,
+        default=None,
+        help="Generate prompts for a single language (default: english).",
+    )
+    parser.add_argument(
+        "--languages",
+        type=_parse_language,
+        nargs="+",
+        default=None,
+        help="Generate prompts for multiple languages in one run (space separated).",
+    )
     parser.add_argument("--split", choices=("harmful", "harmless"), default="harmful")
     parser.add_argument("--num-prompts", type=int, default=64)
     parser.add_argument("--seed", type=int, default=0)
@@ -263,26 +271,25 @@ def main() -> None:
         generation_kwargs.update({"temperature": args.temperature, "top_p": args.top_p})
 
     steering_label = "refusal_language_ablated" if projection else "refusal_only"
-    use_translated_text = args.language != Language.ENGLISH
+    if args.languages is not None and args.language is not None:
+        raise ValueError("Provide either --language or --languages, not both.")
 
-    _generate_split(
-        split=args.split,
-        output_path=args.output_path,
-        language=args.language,
-        use_translated_text=use_translated_text,
-        num_prompts=args.num_prompts,
-        seed=args.seed,
-        batch_size=args.batch_size,
-        steerable=steerable,
-        generation_kwargs=generation_kwargs,
-        steering_label=steering_label,
-    )
+    if args.languages is not None:
+        target_languages = list(dict.fromkeys(args.languages))
+    elif args.language is not None:
+        target_languages = [args.language]
+    else:
+        target_languages = [Language.ENGLISH]
 
-    if not args.skip_harmless and args.split != "harmless":
-        _generate_split(
-            split="harmless",
-            output_path=args.harmless_output_path,
-            language=args.language,
+    primary_records: List[dict] = []
+    harmless_records: List[dict] = []
+
+    for language in target_languages:
+        use_translated_text = language != Language.ENGLISH
+
+        split_records = _generate_split(
+            split=args.split,
+            language=language,
             use_translated_text=use_translated_text,
             num_prompts=args.num_prompts,
             seed=args.seed,
@@ -291,6 +298,37 @@ def main() -> None:
             generation_kwargs=generation_kwargs,
             steering_label=steering_label,
         )
+        primary_records.extend(split_records)
+
+        if not args.skip_harmless and args.split != "harmless":
+            harmless_records.extend(
+                _generate_split(
+                    split="harmless",
+                    language=language,
+                    use_translated_text=use_translated_text,
+                    num_prompts=args.num_prompts,
+                    seed=args.seed,
+                    batch_size=args.batch_size,
+                    steerable=steerable,
+                    generation_kwargs=generation_kwargs,
+                    steering_label=steering_label,
+                )
+            )
+
+    def _write_records(path: Path, records: List[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as fout:
+            json.dump(records, fout, ensure_ascii=False, indent=2)
+        print(f"Wrote {len(records)} prompt-response pairs to {path}")
+
+    _write_records(args.output_path, primary_records)
+
+    if not args.skip_harmless and args.split != "harmless":
+        _write_records(args.harmless_output_path, harmless_records)
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("Interrupted by user.")
+        sys.exit(130)

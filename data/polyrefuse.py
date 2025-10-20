@@ -21,8 +21,16 @@ _FILE_MAP: Dict[Language, str] = {
 }
 
 _FILE_MAP_HARMLESS: Dict[Language, str] = {
+    Language.ARABIC: "harmless_test_translated_ar.json",
+    Language.GERMAN: "harmless_test_translated_de.json",
     Language.ENGLISH: "harmless_test_translated_en.json",
+    Language.SPANISH: "harmless_test_translated_es.json",
+    Language.FRENCH: "harmless_test_translated_fr.json",
+    Language.ITALIAN: "harmless_test_translated_it.json",
+    Language.JAPANESE: "harmless_test_translated_ja.json",
     Language.KOREAN: "harmless_test_translated_ko.json",
+    Language.RUSSIAN: "harmless_test_translated_ru.json",
+    Language.THAI: "harmless_test_translated_th.json",
 }
 
 
